@@ -1,0 +1,5 @@
+build
+bin
+paho*
+.gradle
+.DS_Store

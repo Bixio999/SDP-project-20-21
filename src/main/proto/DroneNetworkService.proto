@@ -1,0 +1,129 @@
+package droneNetwork.proto;
+
+/*
+Hello message used when a new drone enter the network and must introduce itself to the others.
+ */
+message Hello {
+    // Drone ID of the sender
+    required uint64 id =1;
+    // IP address
+    required string ipAddress = 2;
+    // Port of listen server
+    required uint32 listenPort = 3;
+    // Current position of the drone
+    required string position = 4;
+}
+
+/*
+Master message used in two different contexts:
+- when a new drone introduce itself with an Hello message and the master receive that message, create a Master
+  message to let the new drone know which is the master's ID. This message contains the ID of the master and the
+  Hello message the new drone sent, that will be used for the next drones to add the drone to their local drone
+  list. This choice was done to avoid the forwarding of both Hello message for the other drones and Master message
+  for the new drone; in this way the same result is achieved but just with the Hello message until master drone, and
+  the Master message for the rest of the ring network.
+- when a drone wins the election it must communicate to the network its victory to let them store the new master ID,
+  and obtain the current position of the other drones to begin the master's tasks. In this case, the Master message
+  will contains the new master ID and the elected flag set to true. When any other drone receive that message they
+  store the new master ID and add their current position to the positionList attribute before forwarding the message
+  to the next drone.
+ */
+message Master {
+    required uint64 id = 1;
+    repeated Position positionList = 2;
+    optional bool elected = 3;
+    optional Hello newDrone = 4;
+}
+
+/*
+Missing message is used to warn the drone network that a drone quit, and must be deleted from their local drone list.
+It contains the ID of the missing drone and the ID of the drone that noticed its absence. This last attribute is used
+to destroy the message when it returns to the sender drone, meaning all the drones received that message.
+ */
+message Missing {
+    required uint64 missingId = 1;
+    required uint64 senderId = 2;
+}
+
+/*
+Position message is used as attribute for other messages, in two cases:
+- the drone received an election results message (Master message with elected flag true), and must add its current
+  position and battery status to the list in the message to let the master know its status.
+- the drone ended a delivery and must send to master drone the statistics (with a Statistic message), that contains
+  the information about its new position and battery status.
+The ID attribute is used only in the first case, to let the master know which position info belongs to. In the other
+case the ID is stored in Statistic message, so it would be a redundant data.
+ */
+message Position {
+    optional uint64 id = 1;
+    required string position = 2;
+    required uint32 battery = 3;
+}
+
+/*
+Election message is used to execute the election of an new master drone. The ID and battery status stored are
+the ones of the current best candidate.
+ */
+message Election {
+    required uint64 id = 1;
+    required uint32 battery = 2;
+}
+
+/*
+Statistic message is used when a drone complete a delivery and must send to master the statistics generated and the
+information about its new status (position and battery status, sent as Position message attribute).
+ */
+message Statistic {
+    // Timestamp of the statistics generation
+    required string timestamp = 1;
+    // New status of the sender drone
+    required Position position = 2;
+    // Distance covered during the delivery
+    required double distance = 3;
+    // List of pollution average data acquired by the drone sensor
+    repeated double avgPollution = 4;
+    // ID of the sender drone
+    required int64 senderId = 5;
+    // Number of deliveries completed by the drone
+    required int64 deliveriesCompleted = 6;
+}
+
+/*
+Delivery message used by the master drone to assign deliveries to the network. The class obtained by this message is
+used too by Dronazon client when creating an order to send to the master drone (with MQTT), so because of it the ID
+attribute is set to optional.
+ */
+message Delivery {
+    // ID of the receiver drone
+    optional uint64 id = 1;
+    // Position of the package to pick up
+    required string from = 2;
+    // Position of the package delivery
+    required string to = 3;
+    // ID of the order
+    required uint64 deliveryId = 4;
+}
+
+/*
+Response message used just as response message for the RPC definitions. Because of no data exchange between rpc client
+and server, it doesn't need to contains any attribute. Actually the drones answer to RPC calls with a null value,
+because the ACK is intrinsically sent by onNext and onCompleted methods, so no need to check about operation status.
+When a connection issue occurs the onError method is called, so the error handling can be performed only there.
+ */
+message Response {
+}
+
+/*
+RPC service that defines the various requests the drones can do to communicate the messages in the ring network.
+Each rpc has the same name of the message it should be delivered to the next drone. The choice of defining an rpc for
+any type of message the drones helps in the implementation to distinguish the different operations the server drone must
+do based on the message received.
+ */
+service DroneNetworkService {
+    rpc hello (Hello) returns (Response);
+    rpc master (Master) returns (Response);
+    rpc election (Election) returns (Response);
+    rpc statistics (Statistic) returns (Response);
+    rpc delivery (Delivery) returns (Response);
+    rpc missing (Missing) returns (Response);
+}
